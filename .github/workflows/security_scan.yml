@@ -3,7 +3,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: 🛡️ Security & Quality Pipeline (Trivy + PHPStan)
+name: 🛡️ Security & Quality Pipeline (Trivy + PHPStan + Integración)
 
 # Este workflow se ejecuta en push a main, Pull Requests y puede ser ejecutado manualmente (workflow_dispatch).
 on:
@@ -57,7 +57,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-fe.sarif'
-          # AÑADIDO: Categoría Única para el Front-end
+          # Categoría Única para el Front-end
           category: 'trivy-fe-scan'
 
       # --- Escaneo del Task Worker (BE) ---
@@ -80,11 +80,11 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-worker.sarif'
-          # AÑADIDO: Categoría Única para el Worker
+          # Categoría Única para el Worker
           category: 'trivy-worker-scan'
 
       # Paso final de confirmación
-      - name: ✅ Workflow Execution Confirmation
+      - name: ✅ Security Workflow Execution Confirmation
         run: echo "🛡️ Security scan workflow executed successfully!"
         if: always()
 
@@ -113,10 +113,80 @@ jobs:
         run: composer install --prefer-dist --no-progress --no-suggest
         # Nota: Si no tiene composer.json, este paso fallará.
 
-      - name: 🔬 Run PHPStan Analysis (Level 0 - Basic)
-        # Escanea los directorios de código PHP
-        # El nivel 0 es el más indulgente. Debería incrementarse hasta el nivel 9.
-        run: ./vendor/bin/phpstan analyse src/fe src/worker --level 0
+      - name: 🔬 Run PHPStan Analysis (Level 1)
+        # Hemos incrementado el nivel de 0 a 1 para una verificación más estricta
+        run: ./vendor/bin/phpstan analyse src/fe src/worker --level 1 --configuration phpstan.neon
         
       - name: ✅ Code Quality Confirmation
         run: echo "Code quality check with PHPStan passed!"
+
+  integration_tests:
+    name: 🧪 Integration Tests (Docker Compose)
+    # Este job SOLO se ejecuta si los jobs de seguridad y calidad han pasado.
+    needs: [trivy_scan, code_quality]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+      
+      # Genera un archivo .env temporal usando los secrets de GitHub.
+      - name: 🔐 Generate temporary .env file from GitHub Secrets
+        run: |
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" > .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "MARIADB_ROOT_PASSWORD=${{ secrets.MARIADB_ROOT_PASSWORD }}" >> .env
+          echo "POSTGRES_BI_USER=${{ secrets.POSTGRES_BI_USER }}" >> .env
+          echo "POSTGRES_BI_PASSWORD=${{ secrets.POSTGRES_BI_PASSWORD }}" >> .env
+          echo "Temporal .env file created for Docker Compose."
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          MARIADB_ROOT_PASSWORD: ${{ secrets.MARIADB_ROOT_PASSWORD }}
+          POSTGRES_BI_USER: ${{ secrets.POSTGRES_BI_USER }}
+          POSTGRES_BI_PASSWORD: ${{ secrets.POSTGRES_BI_PASSWORD }}
+
+
+      - name: ⬆️ Start Architecture with Docker Compose
+        # --wait asegura que todos los servicios estén 'healthy' (si están configurados) o listos.
+        run: docker compose up -d --build --wait
+
+      - name: ⏳ Wait for services to fully initialize (Extra sleep)
+        run: sleep 30s
+        
+      - name: 🌐 Run Connectivity Test (Front-end)
+        # Obtenemos la IP interna del servicio 'fe-web-1' para acceder a él dentro de la red Docker Compose.
+        run: |
+          FE_CONTAINER_ID=$(docker compose ps -q fe-web-1)
+          if [ -z "$FE_CONTAINER_ID" ]; then
+            echo "Error: Could not find container ID for fe-web-1 service."
+            exit 1
+          fi
+          
+          FE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$FE_CONTAINER_ID")
+          
+          if [ -z "$FE_IP" ]; then
+            echo "Error: Could not find IP for fe-web-1 service."
+            exit 1
+          fi
+          
+          echo "Front-end IP: $FE_IP"
+          
+          # Intentamos acceder al Front-end. El comando 'curl --fail' devuelve un error si el estado HTTP es >= 400.
+          curl -s --fail "http://$FE_IP" -o /dev/null
+          
+          if [ $? -eq 0 ]; then
+            echo "Connectivity test PASSED. Front-end is responding correctly."
+          else
+            echo "Connectivity test FAILED. Front-end is not responding or returned an error status."
+            exit 1
+          fi
+
+
+      - name: ⬇️ Stop and Clean up Docker Compose
+        # Ejecutar siempre, incluso si los tests fallan, para limpiar el entorno.
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+      - name: ✅ Integration Tests Confirmation
+        run: echo "🧪 Todos los tests de integración han pasado exitosamente."
