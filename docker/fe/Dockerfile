@@ -4,12 +4,14 @@ FROM php:8.2-apache
 # Instalación de extensiones necesarias:
 # pdo_pgsql: Para conectarse a PostgreSQL
 # redis: Para la memoria caché
+# amqp: Para conectarse a RabbitMQ
 # zip/git: Herramientas comunes para desarrollo
 RUN apt-get update \
-    && apt-get install -y libpq-dev libzip-dev git \
+    && apt-get install -y libpq-dev libzip-dev git librabbitmq-dev \
     && docker-php-ext-install pdo pdo_pgsql pgsql zip \
     && pecl install redis \
-    && docker-php-ext-enable redis \
+    && pecl install amqp \
+    && docker-php-ext-enable redis amqp \
     # Limpiamos para reducir el tamaño de la imagen (Principio de Seguridad por Minimización)
     && rm -rf /var/lib/apt/lists/*
 

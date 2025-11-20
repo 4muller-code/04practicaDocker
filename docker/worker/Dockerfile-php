@@ -3,10 +3,12 @@ FROM php:8.2-cli
 
 # Instalación de extensiones necesarias:
 # pdo_pgsql: Para interactuar con la DB Master
-# (RabbitMQ requeriría librerías adicionales en un entorno real)
+# amqp: Para conectarse a RabbitMQ
 RUN apt-get update \
-    && apt-get install -y libpq-dev \
+    && apt-get install -y libpq-dev librabbitmq-dev \
     && docker-php-ext-install pdo pdo_pgsql \
+    && pecl install amqp \
+    && docker-php-ext-enable amqp \
     && rm -rf /var/lib/apt/lists/*
 
 # Directorio de trabajo
