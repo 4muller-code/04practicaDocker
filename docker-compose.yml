@@ -1,210 +1,76 @@
-version: "3.8"
+# Configuración principal de Nginx (Balanceador de Carga)
+worker_processes 1;
 
-services:
-  # 🧱 1. BALANCEADOR DE CARGA (LB) - Único punto de entrada
-  lb:
-    image: nginx:stable-alpine
-    container_name: lb
-    ports:
-      # ÚNICO PUERTO EXPUESTO AL EXTERIOR (Seguridad)
-      - "80:80"
-    volumes:
-      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro # Configuración de Proxy Pass
-    networks:
-      - public-net # Solo se comunica con FE y S3
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    depends_on:
-      fe-web-1:
-        condition: service_healthy
-      s3:
-        condition: service_healthy
+events {
+    worker_connections 1024;
+}
 
-  # 🧱 2. FRONT-END (FE) - Servidores Apache/PHP
-  fe-web-1:
-    build:
-      context: ./docker/fe
-      dockerfile: Dockerfile
-    container_name: fe-web-1
-    # Variables de entorno para el Front-end (necesarias para index.php)
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    networks:
-      - public-net  # Recibe tráfico del LB
-      - fe-be-net   # Accede a PG Master, Redis, RabbitMQ
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/index.php"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
 
-  fe-web-2:
-    # Réplica del Front-end (Balanceo de Carga)
-    extends:
-      service: fe-web-1
-    container_name: fe-web-2
+    # Upstream para el tráfico DINÁMICO (Front-end PHP)
+    # Reparte la carga entre los dos servidores FE
+    upstream frontend_app {
+        # Usamos los nombres de los servicios definidos en docker-compose
+        server fe-web-1:80;
+        server fe-web-2:80;
+        # Algoritmo de balanceo: Round Robin por defecto
+    }
 
-  # 🧱 3. BACK-END (BE) - DB, Caché y Colas
-  pg-master:
-    image: postgres:15-alpine
-    container_name: pg-master
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: main_db
-    volumes:
-      - db-pg-master-data:/var/lib/postgresql/data
-    networks:
-      - fe-be-net           # Conexión para lectura/escritura desde el FE
-      - be-net              # Conexión para Worker
-      - db-replication-net  # Conexión para replicación (hacia pg-bi)
-      # NO hay puertos expuestos (Aislamiento de Seguridad)
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user_prod"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
+    # Upstream para el almacenamiento de OBJETOS (MinIO / S3)
+    upstream object_storage {
+        server s3:9000;
+    }
 
-  # Redis para Caché
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    volumes:
-      - cache-redis-data:/data
-    networks:
-      - fe-be-net # Acceso desde el Front-end
-      # NO hay puertos expuestos
+    server {
+        listen 80;
+        server_name localhost;
 
-  # RabbitMQ para Colas
-  rabbitmq:
-    image: rabbitmq:3.12-management-alpine
-    container_name: rabbitmq
-    volumes:
-      - queues-rabbit-data:/var/lib/rabbitmq
-    networks:
-      - fe-be-net # Acceso desde el Front-end para encolar tareas
-      - be-net    # Acceso desde el Task Worker para consumir tareas
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+        # Configuración de Logging para análisis de seguridad
+        access_log /var/log/nginx/access.log;
+        error_log /var/log/nginx/error.log;
 
-  # Task Worker (Consumidor de Cola)
-  task-worker:
-    build:
-      context: ./docker/worker
-      dockerfile: Dockerfile-php
-    container_name: task-worker
-    # No necesita variables de entorno complejas en esta simulación
-    networks:
-      - be-net     # Acceso a RabbitMQ, PG Master
-      - legacy-net # Acceso a la-tomcat para consultar datos heredados
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      pg-master:
-        condition: service_healthy
-    # Se reinicia si falla para asegurar el consumo continuo
-    restart: always
+        # Seguridad básica: Bloquear acceso a archivos sensibles
+        location ~ /\.ht {
+            deny all;
+        }
 
-  # 🧱 4. APLICACIÓN HERETADA (LA)
-  la-tomcat:
-    image: tomcat:10-jdk17-temurin-jammy # Imagen base para Legacy
-    container_name: la-tomcat
-    volumes:
-      - ./src/legacy:/usr/local/tomcat/webapps/legacy
-    networks:
-      - legacy-net # Red aislada
-    # NO hay puertos expuestos (solo accesible internamente)
-    depends_on:
-      la-mariadb:
-        condition: service_started
+        # 1. Manejo del tráfico ESTÁTICO (Archivos, imágenes, documentos)
+        # Si la URL empieza por /static/, la envía al MinIO/S3
+        location /static/ {
+            proxy_pass http://object_storage;
 
-  la-mariadb:
-    image: mariadb:11.1
-    container_name: la-mariadb
-    environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
-      MARIADB_DATABASE: legacy_db
-    volumes:
-      - db-maria-data:/var/lib/mysql
-    networks:
-      - legacy-net # Red aislada
-      # NO hay puertos expuestos
+            # Headers para MinIO
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
 
-  # 🧱 5. ALMACENAMIENTO DE OBJETOS (S3/MinIO)
-  s3:
-    image: minio/minio:latest
-    container_name: s3
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    volumes:
-      - s3-data:/data
-    networks:
-      - public-net # Acceso desde el LB para servir archivos estáticos
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+        # 2. Manejo del tráfico DINÁMICO (PHP) y por defecto
+        location / {
+            # Lo pasa al upstream del FE, balanceando entre fe-web-1 y fe-web-2
+            proxy_pass http://frontend_app;
 
-  # 🧱 6. INTELIGENCIA DE NEGOCIO (BI)
-  pg-bi:
-    image: postgres:15-alpine
-    container_name: pg-bi
-    environment:
-      POSTGRES_USER: ${POSTGRES_BI_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_BI_PASSWORD}
-      POSTGRES_DB: bi_db
-    volumes:
-      - db-pg-bi-data:/var/lib/postgresql/data
-    networks:
-      - bi-net              # Red aislada para la BI
-      - db-replication-net  # Recibe la replicación del Master
-      # NO hay puertos expuestos
+            # Headers de proxy
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
 
-  bi-metabase:
-    image: metabase/metabase:latest
-    container_name: bi-metabase
-    # Exponemos el puerto de Metabase (3000) a un puerto local (8080)
-    # Dejamos 8080 porque 3000 puede estar ocupado.
-    # El LB NO apunta a Metabase, es acceso directo para administradores (Seguridad)
-    ports:
-      - "8080:3000"
-    networks:
-      - bi-net # Accede a pg-bi para generar informes
-    depends_on:
-      pg-bi:
-        condition: service_healthy
+            # Cabeceras de seguridad HTTP
+            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-XSS-Protection "1; mode=block" always;
+            add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        }
 
-# 📡 DEFINICIÓN DE REDES PARA AISLAMIENTO (SEGURIDAD)
-networks:
-  public-net:
-    driver: bridge
-  fe-be-net:
-    driver: bridge
-  be-net:
-    driver: bridge
-  bi-net:
-    driver: bridge
-  db-replication-net:
-    driver: bridge
-  legacy-net:
-    driver: bridge
-
-# 💾 DEFINICIÓN DE VOLUMES PARA PERSISTENCIA
-volumes:
-  db-pg-master-data:
-  db-pg-bi-data:
-  db-maria-data:
-  cache-redis-data:
-  queues-rabbit-data:
-  s3-data: # Para MinIO (aunque MinIO no está definido en este ejemplo, está en el nginx.conf)
+        # Configuración de manejo de errores
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root /usr/share/nginx/html;
+        }
+    }
+}
