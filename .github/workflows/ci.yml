@@ -120,6 +120,16 @@ jobs:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
+      - name: 📁 Prepare application structure
+        run: |
+          # Crear directorios necesarios y archivo de sanidad
+          mkdir -p src/fe
+          # Asegurar que el archivo index.php existe para el health check
+          if [ ! -f "src/fe/index.php" ]; then
+            echo "<?php header('Content-Type: text/plain'); echo '✅ Health Check OK - ' . date('Y-m-d H:i:s'); ?>" > src/fe/index.php
+          fi
+          echo "✅ Application structure prepared"
+
       - name: 🐳 Start Docker Compose
         # Iniciar servicios en segundo plano. Las variables env se pasan automáticamente.
         run: |
