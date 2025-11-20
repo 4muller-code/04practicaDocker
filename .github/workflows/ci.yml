@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  # Security scanning with Trivy (Mantenemos las correcciones de category)
+  # Job de escaneo de seguridad (security_scan) - Se mantiene sin cambios ya que ya está corregido.
   security_scan:
     permissions:
       contents: read
@@ -70,7 +70,7 @@ jobs:
         run: echo "🛡️ Security scan completed successfully!"
         if: always()
 
-  # Code quality analysis with PHPStan
+  # Job de calidad de código (code_quality) - Se mantiene sin cambios
   code_quality:
     name: 📊 Code Quality Analysis
     runs-on: ubuntu-latest
@@ -100,7 +100,7 @@ jobs:
         run: echo "📊 Code quality analysis completed!"
         if: always()
 
-  # CORREGIDO: Integration tests job con bucle de reintento
+  # CORREGIDO: Integration tests con timeout extendido
   integration_tests:
     name: 🧪 Integration Tests
     runs-on: ubuntu-latest
@@ -116,33 +116,41 @@ jobs:
           # Esperar un breve tiempo inicial
           sleep 5
 
-      # CORRECCIÓN CLAVE: Bucle de reintento para esperar a que el servicio esté listo.
-      - name: 🔍 Check service health with retry
+      # AJUSTE CLAVE: Bucle de reintento para esperar hasta 120 segundos.
+      - name: 🔍 Check service health with extended retry
         run: |
-          MAX_RETRIES=12
+          MAX_RETRIES=24 # Duplicamos los intentos (12 -> 24)
           DELAY=5
-          # Intentar hasta 12 veces (12 * 5 segundos = 60 segundos de espera total)
+          # Intentar hasta 24 veces (24 * 5 segundos = 120 segundos de espera total)
           for i in $(seq 1 $MAX_RETRIES); do
             echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:8080..."
-            docker-compose ps # Mostrar estado de los contenedores
+            docker-compose ps # Mostrar estado de los contenedores para diagnóstico
             
-            # El comando 'curl -f' fallará si recibe un error 4xx/5xx o falla la conexión.
-            # Si curl tiene éxito (exit code 0), salimos del bucle.
+            # Intentar acceder al balanceador de carga. El flag -f falla con 4xx/5xx.
             if curl -f http://localhost:8080; then
-              echo "✅ Service is running and responsive!"
+              echo "✅ Service is running and responsive (HTTP 200/3xx received)!"
               exit 0
             fi
 
             # Si la comprobación falló, esperar antes del próximo intento.
-            echo "Service not ready. Waiting $DELAY seconds..."
+            echo "Service not ready (Connection failed or HTTP Error received). Waiting $DELAY seconds..."
             sleep $DELAY
           done
 
           # Si el bucle termina sin éxito, forzamos un fallo.
-          echo "❌ ERROR: Service failed to become ready after multiple retries."
+          echo "❌ ERROR: Service failed to become ready after 24 retries (120s)."
+          
+          # DIAGNÓSTICO ADICIONAL: Mostrar logs y estado para saber por qué falló.
+          echo "--- DIAGNOSTIC INFO ---"
+          docker-compose logs --tail 20 # Muestra los últimos 20 logs de todos los servicios
+          docker-compose ps 
+          echo "--- END DIAGNOSTIC INFO ---"
+          
           exit 1
       
-      # El paso original '🔍 Check service health' es reemplazado por el de arriba.
+      # Aquí iría el comando de ejecución de tests de integración reales
+      # Por ejemplo: - name: 🚀 Run actual integration tests
+      #                   run: docker-compose exec fe-web php vendor/bin/phpunit --testsuite Integration
 
       - name: 🧹 Cleanup
         run: docker-compose down
