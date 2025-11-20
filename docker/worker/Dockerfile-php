@@ -13,7 +13,7 @@ RUN apt-get update \
 WORKDIR /app
 
 # Copiamos el script del consumidor
-COPY src/worker/consumer.php /app/consumer.php
+COPY ../../src/worker/consumer.php /app/consumer.php
 
 # Comando para ejecutar el worker de forma continua
 CMD ["php", "consumer.php"]
