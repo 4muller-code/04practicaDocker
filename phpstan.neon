@@ -6,8 +6,3 @@ parameters:
 
     # Nivel de análisis (el nivel 0 es el que se usa en el CI)
     level: 0
-
-    # Exclusiones de errores comunes que no son críticos para esta etapa
-    ignoreErrors:
-        # Ignora el falso positivo de PDO::setAttribute, es correcto para la configuración de errores.
-        - '#Method PDO::setAttribute\(\) invoked with 2 arguments, 1 expected\.#'
