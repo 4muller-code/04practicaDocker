@@ -57,6 +57,8 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-fe.sarif'
+          # AÑADIDO: Categoría Única para el Front-end
+          category: 'trivy-fe-scan'
 
       # --- Escaneo del Task Worker (BE) ---
 
@@ -78,6 +80,8 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-worker.sarif'
+          # AÑADIDO: Categoría Única para el Worker
+          category: 'trivy-worker-scan'
 
       # Paso final de confirmación
       - name: ✅ Workflow Execution Confirmation
