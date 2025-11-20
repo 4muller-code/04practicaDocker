@@ -2,8 +2,8 @@
 // Configuración de la conexión a servicios (Variables de Entorno seguras)
 $db_host = 'pg-master'; // Nombre del servicio en Docker Compose
 $db_name = 'main_db';
-$db_user = getenv('POSTGRES_USER'); // Se lee del entorno
-$db_pass = getenv('POSTGRES_PASSWORD'); // Se lee del entorno
+$db_user = (string) getenv('POSTGRES_USER'); // Se lee del entorno y se asegura como string
+$db_pass = (string) getenv('POSTGRES_PASSWORD'); // Se lee del entorno y se asegura como string
 $redis_host = 'redis';
 $rabbitmq_host = 'rabbitmq';
 
