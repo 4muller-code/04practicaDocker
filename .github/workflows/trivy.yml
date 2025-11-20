@@ -1,0 +1,85 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+
+name: 🛡️ Security Vulnerability Scan (Trivy)
+
+# Este workflow se ejecuta en push a main, Pull Requests y puede ser ejecutado manualmente (workflow_dispatch).
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    # Las ramas a monitorizar deben ser un subconjunto de las de 'push'
+    branches: [ "main" ]
+  workflow_dispatch: # Permite ejecutar el workflow manualmente
+
+# Permisos a nivel de workflow (todos los jobs)
+permissions:
+  contents: read
+
+jobs:
+  trivy_scan:
+    # Permisos específicos para este job (Mínimo Privilegio)
+    permissions:
+      contents: read       # Para que actions/checkout pueda obtener el código
+      security-events: write # Para que github/codeql-action/upload-sarif pueda subir los resultados SARIF
+      actions: read          # Requerido para repositorios privados
+      
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      # --- Escaneo del Front-end (FE) ---
+
+      # Construcción de la imagen del Front-end (FE)
+      - name: 🏗️ Build Front-end Image (fe-web)
+        # Usamos el contexto raíz ('.') para acceder a 'docker/fe/Dockerfile' y 'src/fe/'
+        run: docker build -t fe-web-image -f docker/fe/Dockerfile .
+
+      - name: 🔎 Scan Front-end Image with Trivy
+        # Usamos un hash de commit específico para inmutabilidad
+        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
+        with:
+          image-ref: 'fe-web-image'
+          # Se usa el template SARIF estándar para la integración con GitHub Security tab
+          format: 'template'
+          template: '@/contrib/sarif.tpl'
+          output: 'trivy-results-fe.sarif'
+          # Solo reportar las vulnerabilidades más graves
+          severity: 'CRITICAL,HIGH'
+
+      - name: 📤 Upload Front-end Trivy results to GitHub Security tab
+        # Se usa la versión más reciente v4 del uploader SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-results-fe.sarif'
+
+      # --- Escaneo del Task Worker (BE) ---
+
+      # Construcción de la imagen del Worker
+      - name: 🏗️ Build Task Worker Image
+        # Usamos el contexto raíz ('.') para acceder a 'docker/worker/Dockerfile-php' y 'src/worker/'
+        run: docker build -t task-worker-image -f docker/worker/Dockerfile-php .
+
+      - name: 🔎 Scan Task Worker Image with Trivy
+        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
+        with:
+          image-ref: 'task-worker-image'
+          format: 'template'
+          template: '@/contrib/sarif.tpl'
+          output: 'trivy-results-worker.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: 📤 Upload Worker Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-results-worker.sarif'
+
+      # Paso final de confirmación
+      - name: ✅ Workflow Execution Confirmation
+        run: echo "🛡️ Security scan workflow executed successfully!"
+        if: always()
