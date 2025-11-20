@@ -142,13 +142,13 @@ jobs:
         run: |
           MAX_RETRIES=24 # Intentar 24 veces
           DELAY=5        # con un delay de 5 segundos (Total: 120s)
-          
+
           for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:80..."
+            echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:80/index.php..."
             docker compose ps # Mostrar estado de los contenedores para diagnóstico
-            
-            # ATENCIÓN: Se ha corregido el puerto de 8080 a 80
-            if curl -f http://localhost:80; then
+
+            # Verificar el health check completo en /index.php
+            if curl -f http://localhost:80/index.php; then
               echo "✅ Service is running and responsive (HTTP 200/3xx received)!"
               exit 0
             fi

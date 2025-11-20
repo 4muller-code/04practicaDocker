@@ -1,37 +1,78 @@
 <?php
-// Archivo de sanidad para health check
-// Este archivo debe existir para que el balanceador de carga funcione
 
-header('Content-Type: text/plain');
-echo "✅ Sistema de Comandas Asíncrono - Health Check OK\n";
-echo "Servidor: " . gethostname() . "\n";
-echo "Timestamp: " . date('Y-m-d H:i:s') . "\n";
-echo "Status: 200 OK\n";
+header('Content-Type: application/json');
 
-// Verificar conexiones básicas si es necesario
-$db_status = "N/A";
-$redis_status = "N/A";
+// --- 1. Variables de Entorno y Credenciales ---
+// Las credenciales de la base de datos y Redis se obtienen de las variables de entorno
+// que Docker Compose pasa al contenedor fe-web-1 (y fe-web-2).
 
+// PostgreSQL
+$PG_HOST = getenv('PG_HOST') ?: 'pg-master';
+$PG_PORT = getenv('PG_PORT') ?: '5432';
+$PG_DB = getenv('POSTGRES_DB') ?: 'main_db';
+$PG_USER = getenv('POSTGRES_USER') ?: 'user_prod';
+$PG_PASSWORD = getenv('POSTGRES_PASSWORD') ?: 'default_password';
+
+// Redis
+$REDIS_HOST = getenv('REDIS_HOST') ?: 'redis';
+$REDIS_PORT = getenv('REDIS_PORT') ?: '6379';
+
+$status = [
+    'application' => [
+        'name' => 'Front-end Load Balanced Service',
+        'status' => 'OK',
+        'timestamp' => date('Y-m-d H:i:s'),
+        'server_info' => gethostname(),
+    ],
+    'services' => [],
+];
+
+$errors = [];
+
+// --- 2. Health Check de PostgreSQL ---
 try {
-    // Intentar conexión a PostgreSQL
-    $pdo = new PDO("pgsql:host=pg-master;dbname=main_db", getenv('POSTGRES_USER'), getenv('POSTGRES_PASSWORD'));
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $db_status = "✅ PostgreSQL: Conexión OK";
-} catch (PDOException $e) {
-    $db_status = "❌ PostgreSQL: " . $e->getMessage();
-}
+    $dsn = "pgsql:host=$PG_HOST;port=$PG_PORT;dbname=$PG_DB";
+    $pdo = new PDO($dsn, $PG_USER, $PG_PASSWORD, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 
-try {
-    // Intentar conexión a Redis
-    $redis = new Redis();
-    $redis->connect('redis', 6379);
-    $redis->set('health_check', time());
-    $redis_status = "✅ Redis: Conexión OK";
+    // Ejecutar una consulta simple para verificar la conexión
+    $result = $pdo->query('SELECT 1');
+    if ($result && $result->fetchColumn() === 1) {
+        $status['services']['postgres'] = ['status' => 'OK', 'details' => 'Database connection successful.'];
+    } else {
+        throw new \Exception('Basic SELECT failed.');
+    }
 } catch (Exception $e) {
-    $redis_status = "❌ Redis: " . $e->getMessage();
+    $status['services']['postgres'] = ['status' => 'FAIL', 'details' => $e->getMessage()];
+    $errors[] = 'PostgreSQL check failed.';
 }
 
-echo "\n--- Verificación de Servicios ---\n";
-echo $db_status . "\n";
-echo $redis_status . "\n";
-?>
+// --- 3. Health Check de Redis ---
+try {
+    // La clase Redis requiere la extensión 'redis' instalada en el Dockerfile de PHP.
+    $redis = new Redis();
+    if ($redis->connect($REDIS_HOST, $REDIS_PORT)) {
+        // Ejecutar un comando simple para verificar la conexión
+        $redis->ping();
+        $status['services']['redis'] = ['status' => 'OK', 'details' => 'Redis connection successful.'];
+    } else {
+        throw new \Exception('Connection failed to Redis host/port.');
+    }
+} catch (Exception $e) {
+    $status['services']['redis'] = ['status' => 'FAIL', 'details' => $e->getMessage()];
+    $errors[] = 'Redis check failed.';
+}
+
+// --- 4. Determinar Estado Final y Respuesta HTTP ---
+if (!empty($errors)) {
+    // Si hay errores en algún servicio crítico, el estado general es FAIL y HTTP 500
+    http_response_code(500);
+    $status['application']['status'] = 'FAIL';
+    $status['application']['errors'] = $errors;
+} else {
+    // Si todos los servicios están OK, el estado general es OK y HTTP 200
+    http_response_code(200);
+}
+
+// 5. Devolver el JSON del estado
+echo json_encode($status, JSON_PRETTY_PRINT);
+exit;
