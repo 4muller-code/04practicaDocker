@@ -20,6 +20,8 @@ services:
     depends_on:
       fe-web-1:
         condition: service_healthy
+      s3:
+        condition: service_healthy
 
   # 🧱 2. FRONT-END (FE) - Servidores Apache/PHP
   fe-web-1:
