@@ -1,0 +1,26 @@
+# Directorios de datos de volumenes (para no versionar los datos de las DBs y caché)
+db-pg-master-data/
+db-pg-bi-data/
+db-maria-data/
+cache-redis-data/
+queues-rabbit-data/
+s3-data/
+
+# Directorios de logs
+logs/
+*.log
+
+# Entornos de desarrollo o temporales
+.env
+.DS_Store
+
+# Archivos temporales del sistema
+*.tmp
+*.temp
+
+# Archivos de IDE
+.vscode/
+.idea/
+
+# Archivos de sistema operativo
+Thumbs.db

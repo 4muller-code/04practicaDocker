@@ -1,0 +1,190 @@
+version: "3.8"
+
+services:
+  # 🧱 1. BALANCEADOR DE CARGA (LB) - Único punto de entrada
+  lb:
+    image: nginx:stable-alpine
+    container_name: lb
+    ports:
+      # ÚNICO PUERTO EXPUESTO AL EXTERIOR (Seguridad)
+      - "80:80"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro # Configuración de Proxy Pass
+    networks:
+      - public-net # Solo se comunica con FE y S3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      fe-web-1:
+        condition: service_healthy
+
+  # 🧱 2. FRONT-END (FE) - Servidores Apache/PHP
+  fe-web-1:
+    build:
+      context: ./docker/fe
+      dockerfile: Dockerfile
+    container_name: fe-web-1
+    # Variables de entorno para el Front-end (necesarias para index.php)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - public-net  # Recibe tráfico del LB
+      - fe-be-net   # Accede a PG Master, Redis, RabbitMQ
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/index.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  fe-web-2:
+    # Réplica del Front-end (Balanceo de Carga)
+    extends:
+      service: fe-web-1
+    container_name: fe-web-2
+
+  # 🧱 3. BACK-END (BE) - DB, Caché y Colas
+  pg-master:
+    image: postgres:15-alpine
+    container_name: pg-master
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: main_db
+    volumes:
+      - db-pg-master-data:/var/lib/postgresql/data
+    networks:
+      - fe-be-net           # Conexión para lectura/escritura desde el FE
+      - be-net              # Conexión para Worker
+      - db-replication-net  # Conexión para replicación (hacia pg-bi)
+      # NO hay puertos expuestos (Aislamiento de Seguridad)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Redis para Caché
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    volumes:
+      - cache-redis-data:/data
+    networks:
+      - fe-be-net # Acceso desde el Front-end
+      # NO hay puertos expuestos
+
+  # RabbitMQ para Colas
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq
+    volumes:
+      - queues-rabbit-data:/var/lib/rabbitmq
+    networks:
+      - fe-be-net # Acceso desde el Front-end para encolar tareas
+      - be-net    # Acceso desde el Task Worker para consumir tareas
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Task Worker (Consumidor de Cola)
+  task-worker:
+    build:
+      context: ./docker/worker
+      dockerfile: Dockerfile-php
+    container_name: task-worker
+    # No necesita variables de entorno complejas en esta simulación
+    networks:
+      - be-net     # Acceso a RabbitMQ, PG Master
+      - legacy-net # Acceso a la-tomcat para consultar datos heredados
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      pg-master:
+        condition: service_healthy
+    # Se reinicia si falla para asegurar el consumo continuo
+    restart: always
+
+  # 🧱 4. APLICACIÓN HERETADA (LA)
+  la-tomcat:
+    image: tomcat:10-jdk17-temurin-jammy # Imagen base para Legacy
+    container_name: la-tomcat
+    volumes:
+      - ./src/legacy:/usr/local/tomcat/webapps/legacy
+    networks:
+      - legacy-net # Red aislada
+    # NO hay puertos expuestos (solo accesible internamente)
+    depends_on:
+      la-mariadb:
+        condition: service_started
+
+  la-mariadb:
+    image: mariadb:11.1
+    container_name: la-mariadb
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: legacy_db
+    volumes:
+      - db-maria-data:/var/lib/mysql
+    networks:
+      - legacy-net # Red aislada
+      # NO hay puertos expuestos
+
+  # 🧱 5. INTELIGENCIA DE NEGOCIO (BI)
+  pg-bi:
+    image: postgres:15-alpine
+    container_name: pg-bi
+    environment:
+      POSTGRES_USER: ${POSTGRES_BI_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_BI_PASSWORD}
+      POSTGRES_DB: bi_db
+    volumes:
+      - db-pg-bi-data:/var/lib/postgresql/data
+    networks:
+      - bi-net              # Red aislada para la BI
+      - db-replication-net  # Recibe la replicación del Master
+      # NO hay puertos expuestos
+
+  bi-metabase:
+    image: metabase/metabase:latest
+    container_name: bi-metabase
+    # Exponemos el puerto de Metabase (3000) a un puerto local (8080)
+    # Dejamos 8080 porque 3000 puede estar ocupado.
+    # El LB NO apunta a Metabase, es acceso directo para administradores (Seguridad)
+    ports:
+      - "8080:3000"
+    networks:
+      - bi-net # Accede a pg-bi para generar informes
+    depends_on:
+      pg-bi:
+        condition: service_healthy
+
+# 📡 DEFINICIÓN DE REDES PARA AISLAMIENTO (SEGURIDAD)
+networks:
+  public-net:
+    driver: bridge
+  fe-be-net:
+    driver: bridge
+  be-net:
+    driver: bridge
+  bi-net:
+    driver: bridge
+  db-replication-net:
+    driver: bridge
+  legacy-net:
+    driver: bridge
+
+# 💾 DEFINICIÓN DE VOLUMES PARA PERSISTENCIA
+volumes:
+  db-pg-master-data:
+  db-pg-bi-data:
+  db-maria-data:
+  cache-redis-data:
+  queues-rabbit-data:
+  s3-data: # Para MinIO (aunque MinIO no está definido en este ejemplo, está en el nginx.conf)

@@ -1,0 +1,19 @@
+# Usamos la versión CLI de PHP, que es más ligera para tareas de consola
+FROM php:8.2-cli
+
+# Instalación de extensiones necesarias:
+# pdo_pgsql: Para interactuar con la DB Master
+# (RabbitMQ requeriría librerías adicionales en un entorno real)
+RUN apt-get update \
+    && apt-get install -y libpq-dev \
+    && docker-php-ext-install pdo pdo_pgsql \
+    && rm -rf /var/lib/apt/lists/*
+
+# Directorio de trabajo
+WORKDIR /app
+
+# Copiamos el script del consumidor
+COPY src/worker/consumer.php /app/consumer.php
+
+# Comando para ejecutar el worker de forma continua
+CMD ["php", "consumer.php"]
