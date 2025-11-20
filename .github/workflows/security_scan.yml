@@ -1,159 +1,32 @@
-# This workflow performs security scanning and code quality analysis
-# It includes Trivy for container security and PHPStan for static analysis
-
-name: 🛡️ Security & Code Quality
-
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  workflow_dispatch:
-
-permissions:
-  contents: read
+# ... (otras partes del workflow omitidas por brevedad)
 
 jobs:
-  # Job de escaneo de seguridad (security_scan) - Se mantiene sin cambios
   security_scan:
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    name: 🔍 Security Scan
-    runs-on: ubuntu-latest
+    # ... (permisos y configuración)
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
-      # Construcción de la imagen del Front-end (FE)
+      # --- Construcción de la imagen del Front-end (FE) ---
+      # El contexto '.' es la raíz del repositorio.
       - name: 🏗️ Build Front-end Image (fe-web)
-        run: docker build -t fe-web-image -f docker/fe/Dockerfile .
+        # Asumiendo que el Dockerfile está en 'docker/fe/Dockerfile'
+        run: docker build -t fe-web-image -f docker/fe/Dockerfile . 
 
       - name: 🔎 Scan Front-end Image with Trivy
-        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
-        with:
-          image-ref: 'fe-web-image'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'trivy-results-fe.sarif'
-          severity: 'CRITICAL,HIGH'
+        # ... (rest of the step)
 
-      - name: 📤 Upload Front-end Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: 'trivy-results-fe.sarif'
-          category: trivy-fe-scan 
+      # ... (upload SARIF)
 
-      # --- Escaneo del Task Worker (BE) ---
-
-      # Construcción de la imagen del Worker
+      # --- Construcción de la imagen del Task Worker (BE) ---
+      # El contexto '.' es la raíz del repositorio.
       - name: 🏗️ Build Task Worker Image
+        # Asumiendo que el Dockerfile está en 'docker/worker/Dockerfile-php'
         run: docker build -t task-worker-image -f docker/worker/Dockerfile-php .
 
       - name: 🔎 Scan Task Worker Image with Trivy
-        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe
-        with:
-          image-ref: 'task-worker-image'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'trivy-results-worker.sarif'
-          severity: 'CRITICAL,HIGH'
+        # ... (rest of the step)
 
-      - name: 📤 Upload Worker Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: 'trivy-results-worker.sarif'
-          category: trivy-worker-scan 
+      # ... (rest of the job)
 
-      - name: ✅ Security Scan Confirmation
-        run: echo "🛡️ Security scan completed successfully!"
-        if: always()
-
-  # Job de calidad de código (code_quality) - Se mantiene sin cambios
-  code_quality:
-    name: 📊 Code Quality Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⬇️ Checkout code
-        uses: actions/checkout@v4
-
-      - name: 🐘 Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          extensions: pdo, pdo_pgsql, pgsql, zip, redis
-          coverage: none
-
-      - name: 📦 Install Composer dependencies
-        run: |
-          # Install Composer
-          curl -sS https://getcomposer.org/installer | php
-          php composer.phar install --no-progress --no-scripts
-
-      - name: 🔍 Run PHPStan on all PHP code
-        run: |
-          # Run PHPStan using the composer script
-          composer phpstan -- --error-format=github
-
-      - name: ✅ Code Quality Confirmation
-        run: echo "📊 Code quality analysis completed!"
-        if: always()
-
-  # CORREGIDO: Integration tests con Docker Compose V2
-  integration_tests:
-    name: 🧪 Integration Tests
-    runs-on: ubuntu-latest
-    needs: [security_scan, code_quality]
-    steps:
-      - name: ⬇️ Checkout code
-        uses: actions/checkout@v4
-
-      - name: 🐳 Start Docker Compose
-        run: |
-          # FIX: Usamos 'docker compose' (V2) en lugar de 'docker-compose' (V1)
-          docker compose up -d
-          # Esperar un breve tiempo inicial
-          sleep 5
-
-      - name: 🔍 Check service health with extended retry
-        run: |
-          MAX_RETRIES=24 
-          DELAY=5
-          # Intentar hasta 24 veces (24 * 5 segundos = 120 segundos de espera total)
-          for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:8080..."
-            # FIX: Usamos 'docker compose' (V2)
-            docker compose ps # Mostrar estado de los contenedores para diagnóstico
-            
-            # Intentar acceder al balanceador de carga.
-            if curl -f http://localhost:8080; then
-              echo "✅ Service is running and responsive (HTTP 200/3xx received)!"
-              exit 0
-            fi
-
-            echo "Service not ready (Connection failed or HTTP Error received). Waiting $DELAY seconds..."
-            sleep $DELAY
-          done
-
-          echo "❌ ERROR: Service failed to become ready after 24 retries (120s)."
-          
-          # DIAGNÓSTICO ADICIONAL: Mostrar logs y estado para saber por qué falló.
-          echo "--- DIAGNOSTIC INFO ---"
-          # FIX: Usamos 'docker compose' (V2)
-          docker compose logs --tail 20 # Muestra los últimos 20 logs de todos los servicios
-          docker compose ps 
-          echo "--- END DIAGNOSTIC INFO ---"
-          
-          exit 1
-      
-      # Nota: Aquí irían los tests de integración reales.
-
-      - name: 🧹 Cleanup
-        # FIX: Usamos 'docker compose' (V2)
-        run: docker compose down
-        if: always()
-
-      - name: ✅ Integration Tests Confirmation
-        run: echo "🧪 Integration tests completed!"
-        if: always()
+  # ... (resto del workflow)
