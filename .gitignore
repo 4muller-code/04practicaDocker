@@ -22,5 +22,8 @@ logs/
 .vscode/
 .idea/
 
+# Archivos de Claude Code
+.claude/
+
 # Archivos de sistema operativo
 Thumbs.db
