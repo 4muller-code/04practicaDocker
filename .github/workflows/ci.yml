@@ -100,45 +100,55 @@ jobs:
         run: echo "📊 Code quality analysis completed!"
         if: always()
 
-  # CORREGIDO: Integration tests con timeout extendido
+  # CORREGIDO: Integration tests con puerto 80 (lb:80:80)
   integration_tests:
     name: 🧪 Integration Tests
     runs-on: ubuntu-latest
     needs: [security_scan, code_quality]
+    
+    # Añadimos variables de entorno de prueba para Docker Compose
+    env:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_BI_USER: biuser
+      POSTGRES_BI_PASSWORD: bipassword
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: miniopassword
+      MARIADB_ROOT_PASSWORD: mariapassword
+
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
       - name: 🐳 Start Docker Compose
+        # Iniciar servicios en segundo plano. Las variables env se pasan automáticamente.
         run: |
-          # Iniciar servicios en segundo plano
-          docker compose up -d
-          # Esperar un breve tiempo inicial
+          docker compose up --build -d
+          # Esperar un breve tiempo inicial para evitar fallos inmediatos
           sleep 5
 
       # AJUSTE CLAVE: Bucle de reintento para esperar hasta 120 segundos.
-      - name: 🔍 Check service health with extended retry
+      - name: 🔍 Check service health with extended retry (Port 80)
         run: |
-          MAX_RETRIES=24 # Duplicamos los intentos (12 -> 24)
-          DELAY=5
-          # Intentar hasta 24 veces (24 * 5 segundos = 120 segundos de espera total)
+          MAX_RETRIES=24 # Intentar 24 veces
+          DELAY=5        # con un delay de 5 segundos (Total: 120s)
+          
           for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:8080..."
+            echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:80..."
             docker compose ps # Mostrar estado de los contenedores para diagnóstico
             
-            # Intentar acceder al balanceador de carga. El flag -f falla con 4xx/5xx.
-            if curl -f http://localhost:8080; then
+            # ATENCIÓN: Se ha corregido el puerto de 8080 a 80
+            if curl -f http://localhost:80; then
               echo "✅ Service is running and responsive (HTTP 200/3xx received)!"
               exit 0
             fi
 
-            # Si la comprobación falló, esperar antes del próximo intento.
             echo "Service not ready (Connection failed or HTTP Error received). Waiting $DELAY seconds..."
             sleep $DELAY
           done
 
           # Si el bucle termina sin éxito, forzamos un fallo.
-          echo "❌ ERROR: Service failed to become ready after 24 retries (120s)."
+          echo "❌ ERROR: Service failed to become ready after $MAX_RETRIES retries (${MAX_RETRIES} x ${DELAY}s)."
           
           # DIAGNÓSTICO ADICIONAL: Mostrar logs y estado para saber por qué falló.
           echo "--- DIAGNOSTIC INFO ---"
@@ -147,10 +157,11 @@ jobs:
           echo "--- END DIAGNOSTIC INFO ---"
           
           exit 1
-      
+          
       # Aquí iría el comando de ejecución de tests de integración reales
-      # Por ejemplo: - name: 🚀 Run actual integration tests
-      #                   run: docker-compose exec fe-web php vendor/bin/phpunit --testsuite Integration
+      # Por ejemplo:
+      # - name: 🚀 Run actual integration tests
+      #   run: docker-compose exec fe-web-1 vendor/bin/phpunit --testsuite Integration
 
       - name: 🧹 Cleanup
         run: docker compose down
