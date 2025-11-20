@@ -16,7 +16,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiamos el código de la aplicación
-COPY ../../src/fe /var/www/html
+# CORRECCIÓN: La ruta es relativa al contexto de construcción (raíz del repositorio)
+COPY src/fe /var/www/html
 
 # Ajustamos permisos (importante para evitar vulnerabilidades de escritura)
 # www-data es el usuario por defecto de Apache
