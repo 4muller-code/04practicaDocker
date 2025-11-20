@@ -43,6 +43,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-fe.sarif'
+          category: trivy-fe-scan # <--- CORRECCIÓN 1: Categoría única para FE
 
       # --- Escaneo del Task Worker (BE) ---
 
@@ -63,6 +64,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-worker.sarif'
+          category: trivy-worker-scan # <--- CORRECCIÓN 2: Categoría única para Worker
 
       # Paso adicional para asegurar que el workflow se ejecute correctamente
       - name: ✅ Security Scan Confirmation
