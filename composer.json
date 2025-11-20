@@ -1,0 +1,20 @@
+{
+    "name": "your-company/docker-compose-app",
+    "description": "Arquitectura de producción segura con Docker Compose y PHP.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^1.11"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "scripts": {
+        "phpstan": "vendor/bin/phpstan analyse"
+    }
+}

@@ -27,3 +27,15 @@ logs/
 
 # Archivos de sistema operativo
 Thumbs.db
+
+# Archivos de Composer
+/vendor/
+composer.lock
+composer.phar
+
+# Archivos de PHPStan
+.phpstan/
+.phpstan.cache
+
+# Archivos temporales de análisis
+.php-cs-fixer.cache

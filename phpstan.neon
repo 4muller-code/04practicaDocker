@@ -1,0 +1,13 @@
+parameters:
+    level: 5
+    paths:
+        - src/fe
+        - src/worker
+    excludePaths:
+        - vendor
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        - '#Call to an undefined method#'
+        - '#Access to an undefined property#'
+        - '#Method.*not found#'
+        - '#Property.*not found#'
