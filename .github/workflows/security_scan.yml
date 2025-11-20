@@ -1,8 +1,9 @@
 name: 🛡️ Security Vulnerability Scan (Trivy)
 
-# Este workflow se ejecuta en dos eventos principales:
+# Este workflow se ejecuta en tres eventos principales:
 # 1. Cuando se sube código a la rama 'main'.
 # 2. Cuando se crea o se actualiza un Pull Request.
+# 3. Cuando se activa manualmente desde la interfaz de GitHub.
 on:
   push:
     branches:
@@ -10,6 +11,7 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 # Permisos necesarios para subir resultados de seguridad
 permissions:
