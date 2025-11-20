@@ -39,11 +39,12 @@ jobs:
           output: 'trivy-results-fe.sarif'
           severity: 'CRITICAL,HIGH'
 
+      # CORREGIDO: Se añade 'category: trivy-fe-scan' para diferenciar esta subida
       - name: 📤 Upload Front-end Trivy results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-fe.sarif'
-          category: trivy-fe-scan # <--- CORRECCIÓN 1: Categoría única para FE
+          category: trivy-fe-scan 
 
       # --- Escaneo del Task Worker (BE) ---
 
@@ -60,11 +61,12 @@ jobs:
           output: 'trivy-results-worker.sarif'
           severity: 'CRITICAL,HIGH'
 
+      # CORREGIDO: Se añade 'category: trivy-worker-scan' para diferenciar esta subida
       - name: 📤 Upload Worker Trivy results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-worker.sarif'
-          category: trivy-worker-scan # <--- CORRECCIÓN 2: Categoría única para Worker
+          category: trivy-worker-scan 
 
       # Paso adicional para asegurar que el workflow se ejecute correctamente
       - name: ✅ Security Scan Confirmation
