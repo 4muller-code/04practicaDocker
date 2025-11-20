@@ -25,14 +25,15 @@ jobs:
       contents: read       # Para que actions/checkout pueda obtener el código
       security-events: write # Para que github/codeql-action/upload-sarif pueda subir los resultados SARIF
       actions: read          # Requerido para repositorios privados
-
+      
     name: Security Scan
     runs-on: ubuntu-latest
-
-    # Define los pasos que se ejecutarán en este trabajo
+    
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
+
+      # --- Escaneo del Front-end (FE) ---
 
       # Construcción de la imagen del Front-end (FE)
       - name: 🏗️ Build Front-end Image (fe-web)
