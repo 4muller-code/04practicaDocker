@@ -15,7 +15,7 @@ RUN apt-get update \
 WORKDIR /app
 
 # Copiamos el script del consumidor
-# CORRECCIÓN: La ruta es relativa al contexto de construcción (raíz del repositorio)
+# La ruta 'src/worker/consumer.php' es relativa a la raíz del repositorio
 COPY src/worker/consumer.php /app/consumer.php
 
 # Comando para ejecutar el worker de forma continua
