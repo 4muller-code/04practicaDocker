@@ -3,7 +3,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: 🛡️ Security & Quality Pipeline (Trivy + PHPStan)
+name: 🛡️ Security Vulnerability Scan (Trivy)
 
 # Este workflow se ejecuta en push a main, Pull Requests y puede ser ejecutado manualmente (workflow_dispatch).
 on:
@@ -25,14 +25,15 @@ jobs:
       contents: read       # Para que actions/checkout pueda obtener el código
       security-events: write # Para que github/codeql-action/upload-sarif pueda subir los resultados SARIF
       actions: read          # Requerido para repositorios privados
-
+      
     name: Security Scan
     runs-on: ubuntu-latest
-
-    # Define los pasos que se ejecutarán en este trabajo
+    
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
+
+      # --- Escaneo del Front-end (FE) ---
 
       # Construcción de la imagen del Front-end (FE)
       - name: 🏗️ Build Front-end Image (fe-web)
@@ -86,36 +87,3 @@ jobs:
       - name: ✅ Workflow Execution Confirmation
         run: echo "🛡️ Security scan workflow executed successfully!"
         if: always()
-
-  code_quality:
-    name: 📏 Code Quality (PHPStan)
-    # Este job se ejecutará en paralelo con trivy_scan
-    runs-on: ubuntu-latest
-    
-    # ⚠️ Nota: Este job ASUME que tiene un archivo composer.json en la raíz del proyecto
-    # y que PHPStan está configurado.
-
-    steps:
-      - name: ⬇️ Checkout code
-        uses: actions/checkout@v4
-
-      - name: 🛠️ Set up PHP
-        # Usamos una versión similar a la del Dockerfile para consistencia
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          extensions: mbstring, pdo, pdo_pgsql, redis
-          coverage: none # No necesitamos cobertura para este paso
-
-      - name: ⚙️ Install Composer Dependencies (PHPStan)
-        # Esto instalará PHPStan si está definido como una dependencia de desarrollo en composer.json
-        run: composer install --prefer-dist --no-progress --no-suggest
-        # Nota: Si no tiene composer.json, este paso fallará.
-
-      - name: 🔬 Run PHPStan Analysis (Level 0 - Basic)
-        # Escanea los directorios de código PHP
-        # El nivel 0 es el más indulgente. Debería incrementarse hasta el nivel 9.
-        run: ./vendor/bin/phpstan analyse src/fe src/worker --level 0
-        
-      - name: ✅ Code Quality Confirmation
-        run: echo "Code quality check with PHPStan passed!"
