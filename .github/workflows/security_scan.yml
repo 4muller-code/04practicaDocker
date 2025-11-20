@@ -1,0 +1,71 @@
+name: 🛡️ Security Vulnerability Scan (Trivy)
+
+# Este workflow se ejecuta en dos eventos principales:
+# 1. Cuando se sube código a la rama 'main'.
+# 2. Cuando se crea o se actualiza un Pull Request.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  trivy_scan:
+    # Ejecuta el trabajo en el último entorno Ubuntu estable
+    runs-on: ubuntu-latest
+    
+    # Define los pasos que se ejecutarán en este trabajo
+    steps:
+      - name: ⬇️ Checkout Code
+        uses: actions/checkout@v4
+        
+      # Construcción de la imagen del Front-end (FE)
+      - name: 🏗️ Build Front-end Image (fe-web)
+        # Usamos el path del Dockerfile y el contexto que definimos
+        run: docker build -t fe-web-image -f docker/fe/Dockerfile ./docker/fe
+        
+      # Escaneo de Seguridad del Front-end con Trivy
+      # Se centra en vulnerabilidades de la imagen y los paquetes instalados.
+      - name: 🔎 Scan Front-end Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          # Escanea la imagen construida
+          image-ref: 'fe-web-image'
+          # Formato de salida para GitHub Security Tab
+          format: 'github'
+          # Nombre del resultado del escaneo
+          output: 'trivy-results-fe.sarif'
+          # Niveles de severidad a reportar (Crítico, Alto)
+          severity: 'CRITICAL,HIGH'
+          
+      # Subir el informe SARIF para que aparezca en la pestaña de Seguridad
+      - name: 📤 Upload Trivy results to GitHub Security Tab (FE)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results-fe.sarif'
+
+      # --- Escaneo del Task Worker (BE) ---
+      
+      # Construcción de la imagen del Worker
+      - name: 🏗️ Build Task Worker Image
+        run: docker build -t task-worker-image -f docker/worker/Dockerfile-php ./docker/worker
+
+      # Escaneo de Seguridad del Task Worker con Trivy
+      - name: 🔎 Scan Task Worker Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'task-worker-image'
+          format: 'github'
+          output: 'trivy-results-worker.sarif'
+          severity: 'CRITICAL,HIGH'
+          
+      # Subir el informe SARIF para el Worker
+      - name: 📤 Upload Trivy results to GitHub Security Tab (Worker)
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results-worker.sarif'
+
+      # Nota: Para un escaneo más completo, se podría escanear también el código fuente
+      # (filesystem) en lugar de solo la imagen.
