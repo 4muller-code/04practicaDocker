@@ -1,76 +1,155 @@
-# Configuración principal de Nginx (Balanceador de Carga)
-worker_processes 1;
+version: "3.8"
 
-events {
-    worker_connections 1024;
-}
+services:
+  # 🧱 1. BALANCEADOR DE CARGA (LB) - Único punto de entrada
+  lb:
+    image: nginx:stable-alpine
+    container_name: lb
+    ports:
+      # ÚNICO PUERTO EXPUESTO AL EXTERIOR (Seguridad)
+      - "80:80"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro # Configuración de Proxy Pass
+    networks:
+      - public-net # Solo se comunica con FE y S3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      fe-web-1:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
 
-http {
-    include       mime.types;
-    default_type  application/octet-stream;
+  # 🧱 2. FRONT-END (FE) - Servidores Apache/PHP
+  fe-web-1:
+    build:
+      context: .
+      dockerfile: docker/fe/Dockerfile
+    container_name: fe-web-1
+    # Variables de entorno para el Front-end (necesarias para index.php)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - public-net  # Recibe tráfico del LB
+      - fe-be-net   # Accede a PG Master, Redis, RabbitMQ
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/index.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-    # Upstream para el tráfico DINÁMICO (Front-end PHP)
-    # Reparte la carga entre los dos servidores FE
-    upstream frontend_app {
-        # Usamos los nombres de los servicios definidos en docker-compose
-        server fe-web-1:80;
-        server fe-web-2:80;
-        # Algoritmo de balanceo: Round Robin por defecto
-    }
+  fe-web-2:
+    # Réplica del Front-end (Balanceo de Carga)
+    build:
+      context: .
+      dockerfile: docker/fe/Dockerfile
+    container_name: fe-web-2
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - public-net
+      - fe-be-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/index.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-    # Upstream para el almacenamiento de OBJETOS (MinIO / S3)
-    upstream object_storage {
-        server s3:9000;
-    }
+  # 🧱 3. BACK-END (BE) - DB, Caché y Colas
+  pg-master:
+    image: postgres:15-alpine
+    container_name: pg-master
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: main_db
+    volumes:
+      - db-pg-master-data:/var/lib/postgresql/data
+    networks:
+      - fe-be-net           # Conexión para lectura/escritura desde el FE
+      - be-net              # Conexión para Worker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
-    server {
-        listen 80;
-        server_name localhost;
+  # Redis para Caché
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    volumes:
+      - cache-redis-data:/data
+    networks:
+      - fe-be-net # Acceso desde el Front-end
 
-        # Configuración de Logging para análisis de seguridad
-        access_log /var/log/nginx/access.log;
-        error_log /var/log/nginx/error.log;
+  # RabbitMQ para Colas
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq
+    volumes:
+      - queues-rabbit-data:/var/lib/rabbitmq
+    networks:
+      - fe-be-net # Acceso desde el Front-end para encolar tareas
+      - be-net    # Acceso desde el Task Worker para consumir tareas
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-        # Seguridad básica: Bloquear acceso a archivos sensibles
-        location ~ /\.ht {
-            deny all;
-        }
+  # Task Worker (Consumidor de Cola)
+  task-worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    container_name: task-worker
+    networks:
+      - be-net     # Acceso a RabbitMQ, PG Master
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      pg-master:
+        condition: service_healthy
+    # Se reinicia si falla para asegurar el consumo continuo
+    restart: always
 
-        # 1. Manejo del tráfico ESTÁTICO (Archivos, imágenes, documentos)
-        # Si la URL empieza por /static/, la envía al MinIO/S3
-        location /static/ {
-            proxy_pass http://object_storage;
+  # 🧱 4. ALMACENAMIENTO DE OBJETOS (S3/MinIO)
+  s3:
+    image: minio/minio:latest
+    container_name: s3
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - s3-data:/data
+    networks:
+      - public-net # Acceso desde el LB para servir archivos estáticos
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-            # Headers para MinIO
-            proxy_set_header Host $http_host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
+# 📡 DEFINICIÓN DE REDES PARA AISLAMIENTO (SEGURIDAD)
+networks:
+  public-net:
+    driver: bridge
+  fe-be-net:
+    driver: bridge
+  be-net:
+    driver: bridge
 
-        # 2. Manejo del tráfico DINÁMICO (PHP) y por defecto
-        location / {
-            # Lo pasa al upstream del FE, balanceando entre fe-web-1 y fe-web-2
-            proxy_pass http://frontend_app;
-
-            # Headers de proxy
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-
-            # Cabeceras de seguridad HTTP
-            add_header X-Frame-Options "SAMEORIGIN" always;
-            add_header X-Content-Type-Options "nosniff" always;
-            add_header X-XSS-Protection "1; mode=block" always;
-            add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-        }
-
-        # Configuración de manejo de errores
-        error_page 500 502 503 504 /50x.html;
-        location = /50x.html {
-            root /usr/share/nginx/html;
-        }
-    }
-}
+# 💾 DEFINICIÓN DE VOLUMES PARA PERSISTENCIA
+volumes:
+  db-pg-master-data:
+  cache-redis-data:
+  queues-rabbit-data:
+  s3-data:
