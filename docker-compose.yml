@@ -11,7 +11,7 @@ services:
     networks:
       - public-net # Solo se comunica con FE y S3
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
+      test: ["CMD", "curl", "-f", "http://localhost/health.php"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -19,7 +19,7 @@ services:
       fe-web-1:
         condition: service_started
       s3:
-        condition: service_healthy
+        condition: service_started
 
   # 🧱 2. FRONT-END (FE) - Servidores Apache/PHP
   fe-web-1:
