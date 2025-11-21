@@ -148,7 +148,40 @@ services:
       retries: 3
       start_period: 40s
 
-  # 🧱 4. ALMACENAMIENTO DE OBJETOS (S3/MinIO)
+  # 🧱 4. APLICACIÓN NEXT.JS (Nueva aplicación web)
+  nextjs-app-1:
+    build:
+      context: ./nextjs-app
+      dockerfile: docker/nextjs/Dockerfile
+    container_name: nextjs-app-1
+    environment:
+      NODE_ENV: production
+    networks:
+      - public-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nextjs-app-2:
+    build:
+      context: ./nextjs-app
+      dockerfile: docker/nextjs/Dockerfile
+    container_name: nextjs-app-2
+    environment:
+      NODE_ENV: production
+    networks:
+      - public-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 🧱 5. ALMACENAMIENTO DE OBJETOS (S3/MinIO)
   s3:
     image: minio/minio:latest
     container_name: s3
