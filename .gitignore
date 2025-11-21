@@ -39,3 +39,7 @@ composer.phar
 
 # Archivos temporales de análisis
 .php-cs-fixer.cache
+
+# Documentación de implementación interna
+ImplementacionTickets.md
+ImplementacionTickets.md:Zone.Identifier
