@@ -133,39 +133,98 @@ jobs:
       - name: 🐳 Start Docker Compose
         # Iniciar servicios en segundo plano. Las variables env se pasan automáticamente.
         run: |
+          # Verificar que las variables de entorno estén disponibles
+          echo "Environment variables check:"
+          echo "POSTGRES_USER: $POSTGRES_USER"
+          echo "MINIO_ROOT_USER: $MINIO_ROOT_USER"
+
+          # Instalar jq si no está disponible (para el health check)
+          sudo apt-get update && sudo apt-get install -y jq
+
+          # Construir e iniciar los servicios
           docker compose up --build -d
           # Esperar un breve tiempo inicial para evitar fallos inmediatos
-          sleep 5
+          sleep 10
 
-      # AJUSTE CLAVE: Bucle de reintento para esperar hasta 120 segundos.
-      - name: 🔍 Check service health with extended retry (Port 80)
+      # MEJORA: Health check robusto que verifica todos los servicios críticos
+      - name: 🔍 Check service health with comprehensive verification
         run: |
-          MAX_RETRIES=24 # Intentar 24 veces
-          DELAY=5        # con un delay de 5 segundos (Total: 120s)
+          MAX_RETRIES=30 # Aumentar a 30 intentos (150 segundos)
+          DELAY=5
 
           for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i/$MAX_RETRIES: Checking service health at http://localhost:80/index.php..."
-            docker compose ps # Mostrar estado de los contenedores para diagnóstico
+            echo "Attempt $i/$MAX_RETRIES: Comprehensive service health check..."
 
-            # Verificar el health check completo en /index.php
-            if curl -f http://localhost:80/index.php; then
-              echo "✅ Service is running and responsive (HTTP 200/3xx received)!"
+            # Verificar que todos los servicios estén "Up"
+            ALL_UP=$(docker compose ps --services | xargs -I {} docker compose ps --format json {} | jq -r 'select(.State == "running") | .Service' | wc -l)
+            TOTAL_SERVICES=$(docker compose ps --services | wc -l)
+
+            echo "Services running: $ALL_UP/$TOTAL_SERVICES"
+
+            # Verificar que el load balancer esté respondiendo
+            if curl -f -s http://localhost:80/index.php > /dev/null; then
+              echo "✅ Load balancer is responding correctly!"
+
+              # Verificar que los servicios backend estén saludables
+              echo "Checking backend services health..."
+
+              # Verificar PostgreSQL
+              if docker compose exec -T pg-master pg_isready -U testuser > /dev/null 2>&1; then
+                echo "✅ PostgreSQL is ready"
+              else
+                echo "❌ PostgreSQL not ready yet"
+                continue
+              fi
+
+              # Verificar Redis
+              if docker compose exec -T redis redis-cli ping > /dev/null 2>&1; then
+                echo "✅ Redis is ready"
+              else
+                echo "❌ Redis not ready yet"
+                continue
+              fi
+
+              # Verificar RabbitMQ
+              if docker compose exec -T rabbitmq rabbitmq-diagnostics check_port_connectivity > /dev/null 2>&1; then
+                echo "✅ RabbitMQ is ready"
+              else
+                echo "❌ RabbitMQ not ready yet"
+                continue
+              fi
+
+              # Verificar MinIO
+              if curl -f -s http://localhost:80/static/minio/health/live > /dev/null 2>&1; then
+                echo "✅ MinIO is ready"
+              else
+                echo "❌ MinIO not ready yet"
+                continue
+              fi
+
+              echo "✅ All services are healthy and responsive!"
               exit 0
             fi
 
-            echo "Service not ready (Connection failed or HTTP Error received). Waiting $DELAY seconds..."
+            echo "Services not fully ready. Waiting $DELAY seconds..."
+            docker compose ps # Mostrar estado actual para diagnóstico
             sleep $DELAY
           done
 
-          # Si el bucle termina sin éxito, forzamos un fallo.
-          echo "❌ ERROR: Service failed to become ready after $MAX_RETRIES retries (${MAX_RETRIES} x ${DELAY}s)."
-          
-          # DIAGNÓSTICO ADICIONAL: Mostrar logs y estado para saber por qué falló.
-          echo "--- DIAGNOSTIC INFO ---"
-          docker compose logs --tail 20 # Muestra los últimos 20 logs de todos los servicios
-          docker compose ps 
+          # Si el bucle termina sin éxito, mostrar diagnóstico detallado
+          echo "❌ ERROR: Services failed to become ready after $MAX_RETRIES retries (${MAX_RETRIES} x ${DELAY}s)."
+
+          echo "--- COMPREHENSIVE DIAGNOSTIC INFO ---"
+          docker compose ps --all
+          echo ""
+          echo "--- SERVICE LOGS (last 30 lines) ---"
+          docker compose logs --tail 30
+          echo ""
+          echo "--- NETWORK STATUS ---"
+          docker network ls
+          echo ""
+          echo "--- CONTAINER DETAILS ---"
+          docker ps -a
           echo "--- END DIAGNOSTIC INFO ---"
-          
+
           exit 1
           
       # Aquí iría el comando de ejecución de tests de integración reales
