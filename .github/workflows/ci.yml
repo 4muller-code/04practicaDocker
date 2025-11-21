@@ -146,29 +146,23 @@ jobs:
           # Esperar un breve tiempo inicial para evitar fallos inmediatos
           sleep 10
 
-      # MEJORA: Health check robusto que verifica todos los servicios críticos
-      - name: 🔍 Check service health with comprehensive verification
+      # MEJORA: Health check simplificado y tolerante
+      - name: 🔍 Check service health with simplified verification
         run: |
-          MAX_RETRIES=30 # Aumentar a 30 intentos (150 segundos)
+          MAX_RETRIES=30 # 30 intentos (150 segundos)
           DELAY=5
 
           for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i/$MAX_RETRIES: Comprehensive service health check..."
+            echo "Attempt $i/$MAX_RETRIES: Checking service health..."
 
-            # Verificar que todos los servicios estén "Up"
-            ALL_UP=$(docker compose ps --services | xargs -I {} docker compose ps --format json {} | jq -r 'select(.State == "running") | .Service' | wc -l)
-            TOTAL_SERVICES=$(docker compose ps --services | wc -l)
-
-            echo "Services running: $ALL_UP/$TOTAL_SERVICES"
-
-            # Verificar que el load balancer esté respondiendo
+            # Verificar que el load balancer esté respondiendo (servicio principal)
             if curl -f -s http://localhost:80/index.php > /dev/null; then
               echo "✅ Load balancer is responding correctly!"
 
-              # Verificar que los servicios backend estén saludables
-              echo "Checking backend services health..."
+              # Verificar servicios críticos mínimos
+              echo "Checking critical services..."
 
-              # Verificar PostgreSQL
+              # Verificar PostgreSQL (crítico)
               if docker compose exec -T pg-master pg_isready -U testuser > /dev/null 2>&1; then
                 echo "✅ PostgreSQL is ready"
               else
@@ -176,7 +170,7 @@ jobs:
                 continue
               fi
 
-              # Verificar Redis
+              # Verificar Redis (crítico)
               if docker compose exec -T redis redis-cli ping > /dev/null 2>&1; then
                 echo "✅ Redis is ready"
               else
@@ -184,7 +178,7 @@ jobs:
                 continue
               fi
 
-              # Verificar RabbitMQ
+              # Verificar RabbitMQ (crítico)
               if docker compose exec -T rabbitmq rabbitmq-diagnostics check_port_connectivity > /dev/null 2>&1; then
                 echo "✅ RabbitMQ is ready"
               else
@@ -192,7 +186,7 @@ jobs:
                 continue
               fi
 
-              # Verificar MinIO - usar endpoint directo en puerto 9000
+              # Verificar MinIO (crítico)
               if curl -f -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
                 echo "✅ MinIO is ready"
               else
@@ -200,29 +194,23 @@ jobs:
                 continue
               fi
 
-              echo "✅ All services are healthy and responsive!"
+              echo "✅ All critical services are healthy!"
+              echo "Integration test environment is ready for testing."
               exit 0
             fi
 
             echo "Services not fully ready. Waiting $DELAY seconds..."
-            docker compose ps # Mostrar estado actual para diagnóstico
             sleep $DELAY
           done
 
-          # Si el bucle termina sin éxito, mostrar diagnóstico detallado
+          # Si el bucle termina sin éxito, mostrar diagnóstico
           echo "❌ ERROR: Services failed to become ready after $MAX_RETRIES retries (${MAX_RETRIES} x ${DELAY}s)."
 
-          echo "--- COMPREHENSIVE DIAGNOSTIC INFO ---"
-          docker compose ps --all
+          echo "--- DIAGNOSTIC INFO ---"
+          docker compose ps
           echo ""
-          echo "--- SERVICE LOGS (last 30 lines) ---"
-          docker compose logs --tail 30
-          echo ""
-          echo "--- NETWORK STATUS ---"
-          docker network ls
-          echo ""
-          echo "--- CONTAINER DETAILS ---"
-          docker ps -a
+          echo "--- RECENT LOGS ---"
+          docker compose logs --tail 20
           echo "--- END DIAGNOSTIC INFO ---"
 
           exit 1
