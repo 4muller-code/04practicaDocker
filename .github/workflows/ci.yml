@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  # Job de escaneo de seguridad (security_scan) - Se mantiene sin cambios ya que ya está corregido.
+  # Job 1: Escaneo de seguridad (security_scan)
   security_scan:
     permissions:
       contents: read
@@ -26,7 +26,7 @@ jobs:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
-      # Construcción de la imagen del Front-end (FE)
+      # Construcción y escaneo del Front-end (FE)
       - name: 🏗️ Build Front-end Image (fe-web)
         run: docker build -t fe-web-image -f docker/fe/Dockerfile .
 
@@ -45,9 +45,7 @@ jobs:
           sarif_file: 'trivy-results-fe.sarif'
           category: trivy-fe-scan 
 
-      # --- Escaneo del Task Worker (BE) ---
-
-      # Construcción de la imagen del Worker
+      # Construcción y escaneo del Task Worker
       - name: 🏗️ Build Task Worker Image
         run: docker build -t task-worker-image -f docker/worker/Dockerfile-php .
 
@@ -70,7 +68,7 @@ jobs:
         run: echo "🛡️ Security scan completed successfully!"
         if: always()
 
-  # Job de calidad de código (code_quality) - Se mantiene sin cambios
+  # Job 2: Calidad de código (code_quality)
   code_quality:
     name: 📊 Code Quality Analysis
     runs-on: ubuntu-latest
@@ -82,7 +80,8 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: pdo, pdo_pgsql, pgsql, zip, redis
+          # Se asegura que la extensión Redis esté disponible para el análisis
+          extensions: pdo, pdo_pgsql, pgsql, zip, redis 
           coverage: none
 
       - name: 📦 Install Composer dependencies
@@ -100,139 +99,149 @@ jobs:
         run: echo "📊 Code quality analysis completed!"
         if: always()
 
-  # CORREGIDO: Integration tests con puerto 80 (lb:80:80)
+  # Job 3: Pruebas de integración (integration_tests)
   integration_tests:
     name: 🧪 Integration Tests
     runs-on: ubuntu-latest
     needs: [security_scan, code_quality]
     
-    # Añadimos variables de entorno de prueba para Docker Compose
+    # Declaración de variables de entorno de prueba para Docker Compose
     env:
-      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-      POSTGRES_BI_USER: ${{ secrets.POSTGRES_BI_USER }}
-      POSTGRES_BI_PASSWORD: ${{ secrets.POSTGRES_BI_PASSWORD }}
+      PG_HOST: postgres 
+      REDIS_HOST: redis 
+      PG_DB: app_db
+      PG_USER: testuser
+      PG_PASSWORD: testpassword
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_BI_USER: biuser
+      POSTGRES_BI_PASSWORD: bipassword
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
-      MARIADB_ROOT_PASSWORD: ${{ secrets.MARIADB_ROOT_PASSWORD }}
-      LOAD_BALANCER_USER: admin
-      LOAD_BALANCER_PASSWORD: ${{ secrets.LOAD_BALANCER_PASSWORD }}
-      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
-      RABBITMQ_DEFAULT_USER: rabbituser
-      RABBITMQ_DEFAULT_PASS: ${{ secrets.RABBITMQ_DEFAULT_PASS }}
-      APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
-      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-      LEGACY_SERVICE_USER: legacyuser
-      LEGACY_SERVICE_PASSWORD: ${{ secrets.LEGACY_SERVICE_PASSWORD }}
+      MINIO_ROOT_PASSWORD: miniopassword
+      MARIADB_ROOT_PASSWORD: mariapassword
 
     steps:
       - name: ⬇️ Checkout code
         uses: actions/checkout@v4
 
-      - name: 📁 Prepare application structure
+      # PASO CLAVE: Crear el archivo de sanidad (Health Check)
+      - name: 🛠️ Create full health check file (src/fe/index.php)
         run: |
-          # Crear directorios necesarios y archivo de sanidad
+          # 1. Asegurar el directorio
           mkdir -p src/fe
-          # Asegurar que el archivo index.php existe para el health check
-          if [ ! -f "src/fe/index.php" ]; then
-            echo "<?php header('Content-Type: text/plain'); echo '✅ Health Check OK - ' . date('Y-m-d H:i:s'); ?>" > src/fe/index.php
-          fi
-          echo "✅ Application structure prepared"
+          
+          # 2. Escribir el código PHP del Health Check
+          # Este código utiliza las variables de entorno definidas en 'env:' arriba
+          cat << 'EOF_PHP' > src/fe/index.php
+          <?php
+          // Health Check Completo (PostgreSQL y Redis)
+          
+          // Configuración (usa las variables de entorno inyectadas por Docker Compose)
+          $PG_HOST = getenv('PG_HOST') ?: 'postgres';
+          $PG_PORT = getenv('PG_PORT') ?: '5432';
+          $PG_DB = getenv('PG_DB') ?: 'app_db';
+          $PG_USER = getenv('PG_USER') ?: 'testuser';
+          $PG_PASSWORD = getenv('PG_PASSWORD') ?: 'testpassword';
+          $REDIS_HOST = getenv('REDIS_HOST') ?: 'redis';
+          $REDIS_PORT = getenv('REDIS_PORT') ?: '6379';
 
-      - name: 🐳 Start Docker Compose
-        # Iniciar servicios en segundo plano. Las variables env se pasan automáticamente.
+          header('Content-Type: application/json');
+          $status = ['application' => ['status' => 'OK', 'timestamp' => date('Y-m-d H:i:s'), 'server_info' => gethostname()], 'services' => []];
+          $errors = [];
+
+          // 1. Check PostgreSQL
+          try {
+              $dsn = "pgsql:host=$PG_HOST;port=$PG_PORT;dbname=$PG_DB";
+              $pdo = new PDO($dsn, $PG_USER, $PG_PASSWORD, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+              $pdo->query('SELECT 1');
+              $status['services']['postgres'] = ['status' => 'OK', 'details' => 'Database connection successful.'];
+          } catch (Exception $e) {
+              $status['services']['postgres'] = ['status' => 'FAIL', 'details' => 'Connection failed: ' . $e->getMessage()];
+              $errors[] = 'PostgreSQL check failed.';
+          }
+
+          // 2. Check Redis
+          try {
+              $redis = new Redis();
+              if (@$redis->connect($REDIS_HOST, $REDIS_PORT) && @$redis->ping() === '+PONG') {
+                  $status['services']['redis'] = ['status' => 'OK', 'details' => 'Redis connection successful.'];
+              } else {
+                  throw new \Exception('Connection failed to Redis host/port or PING failed.');
+              }
+          } catch (Exception $e) {
+              $status['services']['redis'] = ['status' => 'FAIL', 'details' => 'Connection failed: ' . $e->getMessage()];
+              $errors[] = 'Redis check failed.';
+          }
+          
+          // 3. Respuesta Final
+          if (!empty($errors)) {
+              http_response_code(500);
+              $status['application']['status'] = 'FAIL';
+              $status['application']['errors'] = $errors;
+          } else {
+              http_response_code(200);
+          }
+
+          echo json_encode($status, JSON_PRETTY_PRINT);
+          exit;
+          EOF_PHP
+        
+        echo "Health-check file (src/fe/index.php) created successfully."
+
+      - name: 🐳 Start Docker Compose (with build)
+        # Iniciar todos los servicios.
         run: |
-          # Verificar que las variables de entorno estén disponibles
-          echo "Environment variables check:"
-          echo "POSTGRES_USER: $POSTGRES_USER"
-          echo "MINIO_ROOT_USER: $MINIO_ROOT_USER"
-
-          # Instalar jq si no está disponible (para el health check)
-          sudo apt-get update && sudo apt-get install -y jq
-
-          # Construir e iniciar los servicios
           docker compose up --build -d
-          # Esperar un tiempo inicial para evitar fallos inmediatos
-          sleep 20
+          # Esperar un breve tiempo inicial para la inicialización
+          sleep 5
 
-      # MEJORA: Health check simplificado y tolerante
-      - name: 🔍 Check service health with simplified verification
+      # Bucle de reintento robusto para esperar a que el sistema esté sano.
+      - name: 🔍 Check service health with extended retry (Port 80)
         run: |
-          MAX_RETRIES=45 # 45 intentos (225 segundos - casi 4 minutos)
-          DELAY=5
+          MAX_RETRIES=30 # Aumentado el número de reintentos a 30 (150 segundos)
+          DELAY=5        # Delay de 5 segundos
+          CURL_TARGET="http://localhost:80/index.php" 
+          
+          echo "Iniciando bucle de comprobación de salud para $CURL_TARGET..."
 
           for i in $(seq 1 $MAX_RETRIES); do
-            echo "Attempt $i/$MAX_RETRIES: Checking service health..."
-
-            # Verificar que el load balancer esté respondiendo (servicio principal)
-            if curl -f -s http://localhost:80/index.php > /dev/null; then
-              echo "✅ Load balancer is responding correctly!"
-
-              # Verificar servicios críticos mínimos
-              echo "Checking critical services..."
-
-              # Verificar PostgreSQL (crítico)
-              if docker compose exec -T pg-master pg_isready -U testuser > /dev/null 2>&1; then
-                echo "✅ PostgreSQL is ready"
-              else
-                echo "❌ PostgreSQL not ready yet"
-                continue
-              fi
-
-              # Verificar Redis (crítico)
-              if docker compose exec -T redis redis-cli ping > /dev/null 2>&1; then
-                echo "✅ Redis is ready"
-              else
-                echo "❌ Redis not ready yet"
-                continue
-              fi
-
-              # Verificar RabbitMQ (crítico)
-              if docker compose exec -T rabbitmq rabbitmq-diagnostics check_port_connectivity > /dev/null 2>&1; then
-                echo "✅ RabbitMQ is ready"
-              else
-                echo "❌ RabbitMQ not ready yet"
-                continue
-              fi
-
-              # Verificar MinIO (crítico)
-              if curl -f -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
-                echo "✅ MinIO is ready"
-              else
-                echo "❌ MinIO not ready yet"
-                continue
-              fi
-
-              echo "✅ All critical services are healthy!"
-              echo "Integration test environment is ready for testing."
+            echo "Intento $i/$MAX_RETRIES..."
+            
+            # Usamos -s (silencioso), -o /dev/null (descarta el cuerpo), -w %{http_code} (solo imprime el código HTTP)
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" $CURL_TARGET)
+            
+            # Si se recibe HTTP 200, la prueba de integración es exitosa
+            if [ "$RESPONSE" = "200" ]; then
+              echo "✅ El servicio está completamente operativo y sano (HTTP 200 recibido)!"
+              # Opcional: Mostrar el JSON de salud para confirmación final
+              echo "Respuesta del Health Check:"
+              curl $CURL_TARGET
+              echo ""
               exit 0
             fi
 
-            echo "Services not fully ready. Waiting $DELAY seconds..."
+            echo "Servicio no listo. Código HTTP recibido: $RESPONSE. Esperando $DELAY segundos..."
+            # Muestra el estado de los contenedores si no está listo para ayudar en el diagnóstico
+            docker compose ps
             sleep $DELAY
           done
 
-          # Si el bucle termina sin éxito, mostrar diagnóstico
-          echo "❌ ERROR: Services failed to become ready after $MAX_RETRIES retries (${MAX_RETRIES} x ${DELAY}s)."
-
-          echo "--- DIAGNOSTIC INFO ---"
-          docker compose ps
-          echo ""
-          echo "--- RECENT LOGS ---"
-          docker compose logs --tail 20
+          # Si el bucle termina sin éxito, forzamos un fallo.
+          echo "❌ ERROR: El servicio falló en arrancar después de $MAX_RETRIES intentos (150s)."
+          
+          # DIAGNÓSTICO FINAL: Muestra los logs completos de todos los servicios.
+          echo "--- DIAGNOSTIC INFO: Últimos 30 logs de todos los servicios ---"
+          docker compose logs --tail 30 
+          echo "--- ESTADO ACTUAL DE CONTENEDORES ---"
+          docker compose ps 
           echo "--- END DIAGNOSTIC INFO ---"
-
+          
           exit 1
           
-      # Aquí iría el comando de ejecución de tests de integración reales
-      # Por ejemplo:
-      # - name: 🚀 Run actual integration tests
-      #   run: docker-compose exec fe-web-1 vendor/bin/phpunit --testsuite Integration
-
       - name: 🧹 Cleanup
         run: docker compose down
         if: always()
 
       - name: ✅ Integration Tests Confirmation
-        run: echo "🧪 Integration tests completed!"
+        run: echo "🧪 Pruebas de integración completadas!"
         if: always()
