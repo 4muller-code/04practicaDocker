@@ -108,13 +108,22 @@ jobs:
     
     # Añadimos variables de entorno de prueba para Docker Compose
     env:
-      POSTGRES_USER: testuser
-      POSTGRES_PASSWORD: testpassword
-      POSTGRES_BI_USER: biuser
-      POSTGRES_BI_PASSWORD: bipassword
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_BI_USER: ${{ secrets.POSTGRES_BI_USER }}
+      POSTGRES_BI_PASSWORD: ${{ secrets.POSTGRES_BI_PASSWORD }}
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: miniopassword
-      MARIADB_ROOT_PASSWORD: mariapassword
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      MARIADB_ROOT_PASSWORD: ${{ secrets.MARIADB_ROOT_PASSWORD }}
+      LOAD_BALANCER_USER: admin
+      LOAD_BALANCER_PASSWORD: ${{ secrets.LOAD_BALANCER_PASSWORD }}
+      REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+      RABBITMQ_DEFAULT_USER: rabbituser
+      RABBITMQ_DEFAULT_PASS: ${{ secrets.RABBITMQ_DEFAULT_PASS }}
+      APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      LEGACY_SERVICE_USER: legacyuser
+      LEGACY_SERVICE_PASSWORD: ${{ secrets.LEGACY_SERVICE_PASSWORD }}
 
     steps:
       - name: ⬇️ Checkout code
@@ -143,13 +152,13 @@ jobs:
 
           # Construir e iniciar los servicios
           docker compose up --build -d
-          # Esperar un breve tiempo inicial para evitar fallos inmediatos
-          sleep 10
+          # Esperar un tiempo inicial para evitar fallos inmediatos
+          sleep 20
 
       # MEJORA: Health check simplificado y tolerante
       - name: 🔍 Check service health with simplified verification
         run: |
-          MAX_RETRIES=30 # 30 intentos (150 segundos)
+          MAX_RETRIES=45 # 45 intentos (225 segundos - casi 4 minutos)
           DELAY=5
 
           for i in $(seq 1 $MAX_RETRIES); do
