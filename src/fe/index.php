@@ -16,6 +16,7 @@ $PG_PASSWORD = getenv('POSTGRES_PASSWORD') ?: 'default_password';
 // Redis
 $REDIS_HOST = getenv('REDIS_HOST') ?: 'redis';
 $REDIS_PORT = getenv('REDIS_PORT') ?: '6379';
+$REDIS_PASSWORD = getenv('REDIS_PASSWORD') ?: '';
 
 $status = [
     'application' => [
@@ -51,6 +52,8 @@ try {
     // La clase Redis requiere la extensión 'redis' instalada en el Dockerfile de PHP.
     $redis = new Redis();
     if ($redis->connect($REDIS_HOST, $REDIS_PORT)) {
+        // Autenticar con Redis usando la contraseña
+        $redis->auth($REDIS_PASSWORD);
         // Ejecutar un comando simple para verificar la conexión
         $redis->ping();
         $status['services']['redis'] = ['status' => 'OK', 'details' => 'Redis connection successful.'];
