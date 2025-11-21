@@ -192,8 +192,8 @@ jobs:
                 continue
               fi
 
-              # Verificar MinIO
-              if curl -f -s http://localhost:80/static/minio/health/live > /dev/null 2>&1; then
+              # Verificar MinIO - usar endpoint directo en puerto 9000
+              if curl -f -s http://localhost:9000/minio/health/live > /dev/null 2>&1; then
                 echo "✅ MinIO is ready"
               else
                 echo "❌ MinIO not ready yet"
