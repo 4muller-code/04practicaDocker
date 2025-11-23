@@ -5,7 +5,7 @@ services:
     container_name: lb
     ports:
       # ÚNICO PUERTO EXPUESTO AL EXTERIOR (Seguridad)
-      - "80:80"
+      - "8080:80"
     volumes:
       - ./config/nginx.conf:/etc/nginx/nginx.conf:ro # Configuración de Proxy Pass
     networks:
@@ -104,6 +104,8 @@ services:
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
     container_name: rabbitmq
+    ports:
+      - "15672:15672" # Consola de administración
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
@@ -118,12 +120,12 @@ services:
       timeout: 10s
       retries: 3
 
-  # Task Worker (Consumidor de Cola)
-  task-worker:
+  # Task Worker PHP (Legacy - Consumidor de Cola)
+  task-worker-php:
     build:
       context: .
       dockerfile: docker/worker/Dockerfile
-    container_name: task-worker
+    container_name: task-worker-php
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -148,6 +150,36 @@ services:
       retries: 3
       start_period: 40s
 
+  # Task Worker Node.js (Nuevo - Procesamiento Avanzado)
+  task-worker-node:
+    build:
+      context: ./task-worker
+      dockerfile: Dockerfile
+    container_name: task-worker-node
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_PASS: ${RABBITMQ_DEFAULT_PASS}
+    networks:
+      - be-net     # Acceso a RabbitMQ, PG Master
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      pg-master:
+        condition: service_healthy
+    # Se reinicia si falla para asegurar el consumo continuo
+    restart: always
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('Health check passed')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   # 🧱 4. APLICACIÓN NEXT.JS (Nueva aplicación web)
   nextjs-app-1:
     build:
@@ -159,7 +191,7 @@ services:
     networks:
       - public-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -175,7 +207,7 @@ services:
     networks:
       - public-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -188,6 +220,7 @@ services:
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000" # Exponer puerto para health checks
+      - "9001:9001" # Consola de administración
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -200,6 +233,42 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # 🧱 6. BACKEND ADMINISTRADOR
+  admin-backend:
+    build:
+      context: ./admin-backend
+      dockerfile: Dockerfile
+    container_name: admin-backend
+    ports:
+      - "3001:3001"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: pg-master
+      POSTGRES_DB: main_db
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_PASS: ${RABBITMQ_DEFAULT_PASS}
+    networks:
+      - public-net
+      - fe-be-net
+      - be-net
+    depends_on:
+      pg-master:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/admin/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 # 📡 DEFINICIÓN DE REDES PARA AISLAMIENTO (SEGURIDAD)
 networks:

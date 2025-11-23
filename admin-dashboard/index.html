@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - Sistema de Tickets</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.4em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .service-status {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 15px;
+        }
+
+        .status-online {
+            background: #28a745;
+            box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+        }
+
+        .status-offline {
+            background: #dc3545;
+            box-shadow: 0 0 10px rgba(220, 53, 69, 0.5);
+        }
+
+        .service-info {
+            flex: 1;
+        }
+
+        .service-name {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .service-details {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+
+        .refresh-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Panel de Administración</h1>
+            <p>Sistema de Venta de Tickets - Monitoreo de Servicios</p>
+        </div>
+
+        <button class="refresh-btn" onclick="loadDashboard()">🔄 Actualizar Estado</button>
+
+        <div class="dashboard">
+            <div class="card">
+                <h2>📊 Estado de Servicios</h2>
+                <div id="services-status">
+                    <div class="loading">Cargando estado de servicios...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>📈 Estadísticas del Sistema</h2>
+                <div id="system-stats">
+                    <div class="loading">Cargando estadísticas...</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>🔧 Acciones Rápidas</h2>
+                <div class="actions">
+                    <button class="btn btn-primary" onclick="restartService('all')">🔄 Reiniciar Todo</button>
+                    <button class="btn btn-primary" onclick="viewLogs()">📋 Ver Logs</button>
+                    <button class="btn btn-danger" onclick="clearCache()">🗑️ Limpiar Cache</button>
+                </div>
+                <div id="actions-result" style="margin-top: 15px;"></div>
+            </div>
+
+            <div class="card">
+                <h2>🔗 Enlaces de Servicios</h2>
+                <div class="service-links">
+                    <div class="service-status">
+                        <div class="service-info">
+                            <div class="service-name">🌐 Aplicación Next.js</div>
+                            <a href="http://localhost:8080" target="_blank">http://localhost:8080</a>
+                        </div>
+                    </div>
+                    <div class="service-status">
+                        <div class="service-info">
+                            <div class="service-name">📦 MinIO S3</div>
+                            <a href="http://localhost:9001" target="_blank">http://localhost:9001</a>
+                        </div>
+                    </div>
+                    <div class="service-status">
+                        <div class="service-info">
+                            <div class="service-name">🐇 RabbitMQ Management</div>
+                            <a href="http://localhost:15672" target="_blank">http://localhost:15672</a>
+                        </div>
+                    </div>
+                    <div class="service-status">
+                        <div class="service-info">
+                            <div class="service-name">⚙️ Backend Administrador</div>
+                            <a href="http://localhost:3001/api/admin/status" target="_blank">http://localhost:3001</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="timestamp" class="timestamp"></div>
+    </div>
+
+    <script>
+        const ADMIN_BACKEND_URL = 'http://localhost:3001';
+
+        // Cargar dashboard al iniciar
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDashboard();
+            // Actualizar cada 30 segundos
+            setInterval(loadDashboard, 30000);
+        });
+
+        async function loadDashboard() {
+            try {
+                await loadServicesStatus();
+                await loadSystemStats();
+                updateTimestamp();
+            } catch (error) {
+                console.error('Error loading dashboard:', error);
+                showError('services-status', 'Error al cargar el estado de servicios');
+                showError('system-stats', 'Error al cargar estadísticas');
+            }
+        }
+
+        async function loadServicesStatus() {
+            const response = await fetch(`${ADMIN_BACKEND_URL}/api/admin/status`);
+            const data = await response.json();
+
+            const servicesHtml = Object.entries(data.services).map(([service, info]) => {
+                const statusClass = info.status === 'online' ? 'status-online' : 'status-offline';
+                const statusText = info.status === 'online' ? '🟢 En línea' : '🔴 Fuera de línea';
+
+                return `
+                    <div class="service-status">
+                        <div class="status-indicator ${statusClass}"></div>
+                        <div class="service-info">
+                            <div class="service-name">${getServiceIcon(service)} ${service.toUpperCase()}</div>
+                            <div class="service-details">${statusText} - ${info.error || info.info || 'Sin información'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('services-status').innerHTML = servicesHtml;
+        }
+
+        async function loadSystemStats() {
+            const response = await fetch(`${ADMIN_BACKEND_URL}/api/admin/stats`);
+            const data = await response.json();
+
+            let statsHtml = '';
+
+            if (data.stats.database && !data.stats.database.error) {
+                statsHtml += `
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value">${data.stats.database.total_tickets || 0}</div>
+                            <div class="stat-label">Tickets Totales</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.stats.database.total_orders || 0}</div>
+                            <div class="stat-label">Pedidos Totales</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${data.stats.database.total_validations || 0}</div>
+                            <div class="stat-label">Validaciones</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                statsHtml = '<div class="error">No se pudieron cargar las estadísticas de la base de datos</div>';
+            }
+
+            document.getElementById('system-stats').innerHTML = statsHtml;
+        }
+
+        function getServiceIcon(service) {
+            const icons = {
+                postgresql: '🐘',
+                redis: '🗄️',
+                rabbitmq: '🐇',
+                minio: '📦',
+                nextjs: '⚛️'
+            };
+            return icons[service] || '🔧';
+        }
+
+        function updateTimestamp() {
+            const now = new Date().toLocaleString('es-ES');
+            document.getElementById('timestamp').textContent = `Última actualización: ${now}`;
+        }
+
+        function showError(elementId, message) {
+            document.getElementById(elementId).innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        async function restartService(service) {
+            const resultDiv = document.getElementById('actions-result');
+            resultDiv.innerHTML = '<div class="loading">Reiniciando servicio...</div>';
+
+            try {
+                const response = await fetch(`${ADMIN_BACKEND_URL}/api/admin/restart/${service}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                resultDiv.innerHTML = `<div style="color: #28a745;">✅ ${data.message}</div>`;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        function viewLogs() {
+            window.open(`${ADMIN_BACKEND_URL}/api/admin/logs`, '_blank');
+        }
+
+        function clearCache() {
+            const resultDiv = document.getElementById('actions-result');
+            resultDiv.innerHTML = '<div style="color: #28a745;">✅ Cache limpiado (simulado)</div>';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "name": "ticket-system-task-worker",
+  "version": "1.0.0",
+  "description": "Task Worker for Ticket System - Handles asynchronous processing",
+  "main": "src/worker.js",
+  "scripts": {
+    "start": "node src/worker.js",
+    "dev": "nodemon src/worker.js"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.3",
+    "pg": "^8.11.3",
+    "axios": "^1.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "rabbitmq",
+    "task-worker",
+    "ticket-system",
+    "microservices"
+  ],
+  "author": "Ticket System Team",
+  "license": "MIT"
+}
